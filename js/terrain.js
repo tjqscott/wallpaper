@@ -192,6 +192,19 @@ function carveRavines() {
     }
 }
 
+// True if any tile within `r` of (cx, cy) is water. Used by the ravine
+// carver to leave a land buffer between chasms and rivers/sea, which
+// otherwise creates jarring water-on-cliff-edge artefacts.
+function hasWaterNearby(cx, cy, r) {
+    for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+            const t = tileAt(cx + dx, cy + dy);
+            if (t && t.type === 'water') return true;
+        }
+    }
+    return false;
+}
+
 function carveOneRavine(ravineIndex) {
     let rx = 0, ry = 0, ok = false;
     for (let attempt = 0; attempt < 50 && !ok; attempt++) {
@@ -240,6 +253,9 @@ function carveOneRavine(ravineIndex) {
                 }
 
                 // The chasm itself, deepest first so darker rings overwrite lighter ones.
+                // Skip the deep carving if water is close — this prevents rivers
+                // and the sea from butting up against ravine cliffs, which looks bad.
+                if (hasWaterNearby(cx, cy, 2)) continue;
                 if (d < 1.5) {
                     t.type = 'ravine_void';  t.z = PALETTE.ravine_void.z;
                 } else if (d < 3.0 && t.z > PALETTE.ravine_stone.z) {

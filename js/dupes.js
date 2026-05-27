@@ -114,13 +114,21 @@ function updateDupes() {
 }
 
 // ---------- Drawing ----------------------------------------
-// Faithful port of the Claude Factory dupe — 10x14ish in absolute units,
-// rescaled to `unit` so it looks right at any tile size.
+// Faithful port of the Claude Factory dupe, but reworked so the foot
+// anchor `y` is the TRUE bottom of the sprite — nothing draws below it.
+// This is critical: dupes are Y-sorted by row, and row Y+1's terrain is
+// drawn AFTER the dupes in row Y, so anything that hung below the anchor
+// got painted over. Here the legs hinge upward (knees bend) rather than
+// down, so both feet stay planted on the ground line.
 //
-// (px, py) is the dupe's foot anchor in canvas pixels.
+// (px, py) is the foot anchor (the line both feet stand on) in canvas px.
 function drawDupe(ctx, d, px, py, unit) {
-    const bob = d.state === 'walk' ? Math.sin(d.bobPhase * 2) * 0.6 * unit
-                                   : Math.sin(d.bobPhase * 0.5) * 0.3 * unit;
+    // Walking bob: the whole sprite lifts and falls a touch each step.
+    // While idle, a slower, smaller breath cycle.
+    // Bob is upward only (negative) so the sprite never dips below the anchor.
+    const bobRaw = d.state === 'walk' ? Math.abs(Math.sin(d.bobPhase * 2))
+                                      : Math.abs(Math.sin(d.bobPhase * 0.5)) * 0.5;
+    const bob = -bobRaw * 0.5 * unit;
     const x = px;
     const y = py + bob;
     const flip = d.dir < 0;
@@ -132,65 +140,83 @@ function drawDupe(ctx, d, px, py, unit) {
         ctx.translate(-x, 0);
     }
 
-    // Foot shadow.
+    // Foot shadow — sits at the foot anchor (not the bobbing y), so the
+    // shadow stays glued to the ground while the dupe bobs above it.
     ctx.fillStyle = DUPE_PALETTE.shadow;
     ctx.beginPath();
-    ctx.ellipse(x, y + 1, 2.4 * unit, 0.9 * unit, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, py, 2.4 * unit, 0.9 * unit, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Legs (swing while walking).
-    const legSwing = d.state === 'walk' ? Math.sin(d.bobPhase * 2) * 1.0 * unit : 0;
+    // ---- Layout (all measurements upward from y, the foot anchor) ----
+    const legH  = 2.8 * unit;                    // standing leg length
+    const bodyH = 4.2 * unit;
+    const bodyTop  = y - legH - bodyH;
+    const headH = 3.0 * unit;
+    const headTop  = bodyTop - headH;
+
+    // Legs — bottom planted at y, top hinges up when walking (knee bends).
+    // legBend > 0 = leg shortens at the top, foot stays planted.
+    const swing = d.state === 'walk' ? Math.sin(d.bobPhase * 2) : 0;
+    const legBendL = Math.max(0, swing) * 0.9 * unit;
+    const legBendR = Math.max(0, -swing) * 0.9 * unit;
+    const legW = 1.3 * unit;
     ctx.fillStyle = DUPE_PALETTE.legs;
-    ctx.fillRect(x - 1.4 * unit, y - 2.4 * unit, 1.3 * unit, 2.6 * unit + legSwing);
-    ctx.fillRect(x + 0.1 * unit, y - 2.4 * unit, 1.3 * unit, 2.6 * unit - legSwing);
+    ctx.fillRect(x - 1.4 * unit, y - legH + legBendL, legW, legH - legBendL);
+    ctx.fillRect(x + 0.1 * unit, y - legH + legBendR, legW, legH - legBendR);
 
     // Body.
     ctx.fillStyle = d.clothes;
-    ctx.fillRect(x - 1.7 * unit, y - 6.4 * unit, 3.4 * unit, 4.0 * unit);
-    // Subtle highlight stripe down the front for shading.
+    ctx.fillRect(x - 1.7 * unit, bodyTop, 3.4 * unit, bodyH);
+    // Subtle vertical highlight down the centre for shading.
     ctx.fillStyle = 'rgba(255,255,255,0.10)';
-    ctx.fillRect(x - 0.6 * unit, y - 6.2 * unit, 1.2 * unit, 3.6 * unit);
+    ctx.fillRect(x - 0.6 * unit, bodyTop + 0.2 * unit, 1.2 * unit, bodyH - 0.4 * unit);
 
-    // Arms (swing while walking).
-    const armSwing = d.state === 'walk' ? Math.sin(d.bobPhase * 2) * 0.8 * unit : 0;
+    // Arms — swing opposite to legs while walking.
+    const armSwing = d.state === 'walk' ? Math.sin(d.bobPhase * 2) * 0.7 * unit : 0;
+    const armTop = bodyTop + 0.4 * unit;
+    const armH = 2.6 * unit;
     ctx.fillStyle = d.clothes;
-    ctx.fillRect(x - 2.6 * unit, y - 6.0 * unit + armSwing, 0.9 * unit, 2.4 * unit);
-    ctx.fillRect(x + 1.7 * unit, y - 6.0 * unit - armSwing, 0.9 * unit, 2.4 * unit);
+    ctx.fillRect(x - 2.6 * unit, armTop - armSwing, 0.9 * unit, armH);
+    ctx.fillRect(x + 1.7 * unit, armTop + armSwing, 0.9 * unit, armH);
 
-    // Carried item (drawn above the head).
+    // Carried item — floats just above the head.
     if (d.carrying) {
+        const carryH = 2.6 * unit;
+        const carryTop = headTop - carryH - 0.4 * unit;
         ctx.fillStyle = d.carryColor;
-        ctx.fillRect(x - 1.7 * unit, y - 11.0 * unit, 3.4 * unit, 2.6 * unit);
+        ctx.fillRect(x - 1.7 * unit, carryTop, 3.4 * unit, carryH);
         ctx.strokeStyle = 'rgba(0,0,0,0.4)';
         ctx.lineWidth = 0.4;
-        ctx.strokeRect(x - 1.7 * unit, y - 11.0 * unit, 3.4 * unit, 2.6 * unit);
+        ctx.strokeRect(x - 1.7 * unit, carryTop, 3.4 * unit, carryH);
     }
 
-    // Head.
+    // Head + cap band.
     ctx.fillStyle = d.skin;
-    ctx.fillRect(x - 1.4 * unit, y - 9.3 * unit, 2.8 * unit, 3.0 * unit);
-    // Hair/cap band.
+    ctx.fillRect(x - 1.4 * unit, headTop, 2.8 * unit, headH);
     ctx.fillStyle = d.clothes;
-    ctx.fillRect(x - 1.4 * unit, y - 9.6 * unit, 2.8 * unit, 1.0 * unit);
+    ctx.fillRect(x - 1.4 * unit, headTop, 2.8 * unit, 0.9 * unit);
 
-    // Eyes — shift forward when "walking" (here: always slightly forward).
+    // Eyes — slightly forward of centre to suggest direction.
     ctx.fillStyle = DUPE_PALETTE.eye;
+    const eyeY = headTop + 1.3 * unit;
     const eyeX = x + 0.4 * unit;
-    ctx.fillRect(eyeX - 0.7 * unit, y - 8.0 * unit, 0.7 * unit, 0.7 * unit);
-    ctx.fillRect(eyeX + 0.4 * unit, y - 8.0 * unit, 0.7 * unit, 0.7 * unit);
+    ctx.fillRect(eyeX - 0.7 * unit, eyeY, 0.7 * unit, 0.7 * unit);
+    ctx.fillRect(eyeX + 0.4 * unit, eyeY, 0.7 * unit, 0.7 * unit);
 
     ctx.restore();
 
     // Name tag — appears for 60 ticks every 240, cycled per-dupe so they
-    // don't all flash at once.
+    // don't all flash at once. Drawn outside the flip transform so text
+    // never appears mirrored.
     if (tick % 240 < 60 && Math.floor(tick / 240) % Math.max(1, dupes.length) === d.id) {
+        const tagY = headTop - 12;
         const tagW = Math.max(28, d.name.length * 4 + 8);
         ctx.fillStyle = DUPE_PALETTE.nameTagBg;
-        ctx.fillRect(x - tagW / 2, y - 13.5 * unit, tagW, 8);
+        ctx.fillRect(x - tagW / 2, tagY, tagW, 8);
         ctx.fillStyle = DUPE_PALETTE.nameTagFg;
         ctx.font = '6px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(d.name, x, y - 13.5 * unit + 4);
+        ctx.fillText(d.name, x, tagY + 4);
     }
 }

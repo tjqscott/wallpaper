@@ -56,44 +56,51 @@ function strataColour(baseType, z) {
 // than the previous stacked-block tree, so it doesn't dominate the grid.
 function drawTree(px, py, seed) {
     const t = tileSize;
-    // Per-tree wobble for variety. `seed` is [0,1) from terrain.
-    const heightVar = (seed * 0.4) * t;
     const cx = px + t / 2;        // centre x of the tile
+    // Per-tree size variation. Bigger seeds = taller tree (both trunk
+    // and canopy grow together so the trunk always meets the canopy).
+    const sizeBonus = (seed * 0.35) * t;
+    const groundY = py + 0.55 * t;          // where the trunk base / shadow sits
 
     // Soft ground shadow.
     ctx.fillStyle = TREE_PALETTE.shadow;
-    ctx.fillRect(cx - 0.45 * t, py + 0.55 * t, 0.9 * t, 0.25 * t);
+    ctx.fillRect(cx - 0.45 * t, groundY, 0.9 * t, 0.25 * t);
 
-    // Trunk — slim, two-tone for tiny shading.
+    // Trunk — slim, two-tone for tiny shading. Goes from groundY up by trunkH.
     const trunkW = Math.max(2, 0.22 * t);
-    const trunkH = 0.85 * t;
+    const trunkH = 0.85 * t + sizeBonus;
+    const trunkTop = groundY - trunkH;
     ctx.fillStyle = TREE_PALETTE.trunkDark;
-    ctx.fillRect(cx - trunkW / 2, py + 0.55 * t - trunkH, trunkW, trunkH);
+    ctx.fillRect(cx - trunkW / 2, trunkTop, trunkW, trunkH);
     ctx.fillStyle = TREE_PALETTE.trunkLight;
-    ctx.fillRect(cx - trunkW / 2, py + 0.55 * t - trunkH, Math.max(1, trunkW * 0.4), trunkH);
+    ctx.fillRect(cx - trunkW / 2, trunkTop, Math.max(1, trunkW * 0.4), trunkH);
 
-    // Three canopy slabs, each smaller + higher.
-    // The bottom one is the widest darkest, top one is the smallest brightest.
-    const canopyTop = py + 0.55 * t - trunkH - heightVar;
+    // Three canopy slabs, stacked upward from the trunk top.
+    // The bottom slab's BOTTOM sits exactly at trunkTop so they always meet.
+    // Each successive slab is narrower + sits above the previous one with a
+    // small overlap so the canopy reads as a single mass.
 
-    // Layer 1 — widest, dark.
+    // Layer 1 (bottom): widest, dark. Bottom at trunkTop.
     let lw = 1.5 * t, lh = 0.7 * t;
+    let layerBottom = trunkTop;
     ctx.fillStyle = TREE_PALETTE.leafDark;
-    ctx.fillRect(cx - lw / 2, canopyTop - lh, lw, lh);
+    ctx.fillRect(cx - lw / 2, layerBottom - lh, lw, lh);
 
-    // Layer 2 — mid.
+    // Layer 2 (mid): narrower, sits on top of layer 1 with overlap.
+    layerBottom -= lh * 0.85;
     lw = 1.2 * t; lh = 0.6 * t;
     ctx.fillStyle = TREE_PALETTE.leafMid;
-    ctx.fillRect(cx - lw / 2, canopyTop - lh * 1.7, lw, lh);
+    ctx.fillRect(cx - lw / 2, layerBottom - lh, lw, lh);
 
-    // Layer 3 — top, brightest.
+    // Layer 3 (top): narrowest, brightest.
+    layerBottom -= lh * 0.85;
     lw = 0.8 * t; lh = 0.5 * t;
     ctx.fillStyle = TREE_PALETTE.leafLight;
-    ctx.fillRect(cx - lw / 2, canopyTop - lh * 2.9, lw, lh);
+    ctx.fillRect(cx - lw / 2, layerBottom - lh, lw, lh);
 
     // Tiny highlight pixel on the top-right of the canopy.
     ctx.fillStyle = TREE_PALETTE.leafHighlight;
-    ctx.fillRect(cx + 0.1 * t, canopyTop - lh * 2.8, Math.max(1, 0.2 * t), Math.max(1, 0.2 * t));
+    ctx.fillRect(cx + 0.1 * t, layerBottom - lh * 0.9, Math.max(1, 0.2 * t), Math.max(1, 0.2 * t));
 }
 
 // ---------- Single tile ------------------------------------
@@ -121,18 +128,17 @@ function drawTile(x, y) {
             }
 
             // Waterfall — paint the cliff face as flowing water.
+            // Two layers: a base blue plate, then a brighter animated streak.
+            // No bright-white centre line; that read as a hard seam, not flow.
             if (tile.feature === 'waterfall') {
                 let f = ((tick * 0.08) - layer * 0.15) % 1;
                 if (f < 0) f += 1;
-                ctx.fillStyle = 'rgba(56, 139, 186, 0.9)';
+                ctx.fillStyle = 'rgba(56, 139, 186, 0.85)';
                 ctx.fillRect(px, drawY + tileSize + layer * CONFIG.Z_MULT,
                              tileSize + 0.5, CONFIG.Z_MULT + 0.5);
-                ctx.fillStyle = `rgba(200, 230, 255, ${0.2 + f * 0.6})`;
-                ctx.fillRect(px + tileSize * 0.2, drawY + tileSize + layer * CONFIG.Z_MULT,
-                             tileSize * 0.6, CONFIG.Z_MULT + 0.5);
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-                ctx.fillRect(px + tileSize * 0.4, drawY + tileSize + layer * CONFIG.Z_MULT,
-                             1.5, CONFIG.Z_MULT + 0.5);
+                ctx.fillStyle = `rgba(200, 230, 255, ${0.15 + f * 0.45})`;
+                ctx.fillRect(px + tileSize * 0.25, drawY + tileSize + layer * CONFIG.Z_MULT,
+                             tileSize * 0.5, CONFIG.Z_MULT + 0.5);
             }
         }
         // Thin ambient occlusion line at the base of the cliff.
@@ -212,12 +218,16 @@ function groupDupesByRow() {
 
 function drawDupesInRow(rowBucket) {
     for (const d of rowBucket) {
-        const tile = tileAt(Math.floor(d.x), Math.floor(d.y));
+        const gx = Math.floor(d.x), gy = Math.floor(d.y);
+        const tile = tileAt(gx, gy);
         const z = tile ? tile.z : 0;
-        // Foot anchor in canvas pixels, lifted by the tile's elevation.
+        // Smooth horizontal motion (d.x float), but vertical anchor is
+        // pinned to the dupe's tile row at 65% down — this guarantees
+        // the foot anchor never falls into the next tile row, which is
+        // drawn AFTER the dupes in this row and would otherwise paint
+        // over the legs.
         const px = offsetX + d.x * tileSize;
-        const py = offsetY + d.y * tileSize - z * CONFIG.Z_MULT + tileSize * 0.5;
-        // Scale dupe to look right at any tile size. ~14 absolute units tall.
+        const py = offsetY + gy * tileSize + tileSize * 0.65 - z * CONFIG.Z_MULT;
         const unit = Math.max(0.6, tileSize / 6);
         drawDupe(ctx, d, px, py, unit);
     }
