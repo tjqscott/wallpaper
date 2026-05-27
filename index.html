@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Island Colony — Terrain, Trees, Dupes</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0b0e14; overflow: hidden; }
+    canvas { display: block; image-rendering: pixelated; }
+    #controls {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        z-index: 10;
+    }
+    button {
+        background: rgba(11, 14, 20, 0.9);
+        border: 1px solid #3a4a5a;
+        color: #9ab0c0;
+        padding: 8px 16px;
+        cursor: pointer;
+        font-family: monospace;
+        font-size: 12px;
+        text-transform: uppercase;
+    }
+    button:hover { background: #1a2230; color: #fff; border-color: #7ee8a2; }
+</style>
+</head>
+<body>
+
+<div id="controls">
+    <button id="btn-regen">Regenerate</button>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<!--
+    Scripts load in dependency order. Plain <script> tags (no `type=module`)
+    so this still runs from `file://` and inside Wallpaper Engine without
+    extra setup.
+-->
+<script src="js/config.js"></script>
+<script src="js/noise.js"></script>
+<script src="js/terrain.js"></script>
+<script src="js/dupes.js"></script>
+<script src="js/render.js"></script>
+<script src="js/main.js"></script>
+
+</body>
+</html>
