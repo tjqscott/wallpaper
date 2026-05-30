@@ -48,7 +48,7 @@ function spawnDupes() {
             skin:    DUPE_PALETTE.skinTones[i % DUPE_PALETTE.skinTones.length],
             clothes: DUPE_PALETTE.clothes[i % DUPE_PALETTE.clothes.length],
             state: 'walk',                       // 'walk' | 'idle'
-            carrying: Math.random() < 0.3,       // small chance of starting loaded
+            carrying: false,                     // enabled once jobs exist
             carryColor: ['#c89a5a', '#8a8a8a', '#a0d080'][Math.floor(Math.random() * 3)],
         });
     }
@@ -87,8 +87,6 @@ function updateDupes() {
                 d.state = 'walk';
                 pickNewTarget(d);
                 d.wait = 120 + Math.random() * 240;
-                // Toggle carry occasionally.
-                if (Math.random() < 0.15) d.carrying = !d.carrying;
             }
         }
 
@@ -99,15 +97,17 @@ function updateDupes() {
         const dist = Math.hypot(dx, dy);
         if (dist < 0.05) continue;
 
-        const speed = d.carrying ? 0.02 : 0.03;
+        const speed = d.carrying ? 0.03 : 0.045;
         d.x += (dx / dist) * speed;
         d.y += (dy / dist) * speed;
         if (Math.abs(dx) > 0.01) d.dir = dx > 0 ? 1 : -1;
 
-        // Safety: if the dupe somehow ended up on a non-walkable tile
-        // (e.g. terrain regenerated under their feet), pick a new target.
-        const here = tileAt(Math.floor(d.x), Math.floor(d.y));
-        if (!here || !WALKABLE_TYPES.has(here.type)) {
+        // Safety: only re-target if the *destination* tile is non-walkable
+        // (e.g. terrain regenerated). Never re-target based on the float
+        // position mid-crossing — that fires every time a dupe crosses a
+        // tile boundary and causes the visible teleport snap.
+        const dest = tileAt(Math.floor(d.tx), Math.floor(d.ty));
+        if (!dest || !WALKABLE_TYPES.has(dest.type)) {
             pickNewTarget(d);
         }
     }
@@ -154,15 +154,16 @@ function drawDupe(ctx, d, px, py, unit) {
     const headH = 3.0 * unit;
     const headTop  = bodyTop - headH;
 
-    // Legs — bottom planted at y, top hinges up when walking (knee bends).
-    // legBend > 0 = leg shortens at the top, foot stays planted.
+    // Legs — tops always flush with body bottom (y - legH), feet can rise
+    // when knee bends (leg shortens from the bottom, not the top).
+    // This keeps the leg/body join seamless regardless of swing amount.
     const swing = d.state === 'walk' ? Math.sin(d.bobPhase * 2) : 0;
-    const legBendL = Math.max(0, swing) * 0.9 * unit;
-    const legBendR = Math.max(0, -swing) * 0.9 * unit;
+    const footRaiseL = Math.max(0,  swing) * 0.9 * unit;
+    const footRaiseR = Math.max(0, -swing) * 0.9 * unit;
     const legW = 1.3 * unit;
     ctx.fillStyle = DUPE_PALETTE.legs;
-    ctx.fillRect(x - 1.4 * unit, y - legH + legBendL, legW, legH - legBendL);
-    ctx.fillRect(x + 0.1 * unit, y - legH + legBendR, legW, legH - legBendR);
+    ctx.fillRect(x - 1.4 * unit, y - legH, legW, legH - footRaiseL);
+    ctx.fillRect(x + 0.1 * unit,  y - legH, legW, legH - footRaiseR);
 
     // Body.
     ctx.fillStyle = d.clothes;
@@ -179,17 +180,6 @@ function drawDupe(ctx, d, px, py, unit) {
     ctx.fillRect(x - 2.6 * unit, armTop - armSwing, 0.9 * unit, armH);
     ctx.fillRect(x + 1.7 * unit, armTop + armSwing, 0.9 * unit, armH);
 
-    // Carried item — floats just above the head.
-    if (d.carrying) {
-        const carryH = 2.6 * unit;
-        const carryTop = headTop - carryH - 0.4 * unit;
-        ctx.fillStyle = d.carryColor;
-        ctx.fillRect(x - 1.7 * unit, carryTop, 3.4 * unit, carryH);
-        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
-        ctx.lineWidth = 0.4;
-        ctx.strokeRect(x - 1.7 * unit, carryTop, 3.4 * unit, carryH);
-    }
-
     // Head + cap band.
     ctx.fillStyle = d.skin;
     ctx.fillRect(x - 1.4 * unit, headTop, 2.8 * unit, headH);
@@ -202,6 +192,18 @@ function drawDupe(ctx, d, px, py, unit) {
     const eyeX = x + 0.4 * unit;
     ctx.fillRect(eyeX - 0.7 * unit, eyeY, 0.7 * unit, 0.7 * unit);
     ctx.fillRect(eyeX + 0.4 * unit, eyeY, 0.7 * unit, 0.7 * unit);
+
+    // Carried item — drawn last so it paints over the cap band.
+    // A small square centred on the head top; half the head width so it
+    // reads as a resource bundle without overwhelming the sprite.
+    if (d.carrying) {
+        const carryS = 1.6 * unit;                    // square side length
+        const carryTop = headTop - carryS * 0.8;       // mostly above, slightly overlaps cap
+        ctx.fillStyle = d.carryColor;
+        ctx.fillRect(x - carryS / 2, carryTop, carryS, carryS);
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.fillRect(x - carryS / 2, carryTop, carryS, Math.max(1, carryS * 0.25)); // top shadow stripe
+    }
 
     ctx.restore();
 

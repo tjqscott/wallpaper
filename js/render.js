@@ -25,11 +25,14 @@ function initRender(canvasEl) {
 function resize() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-    const tileW = Math.floor(canvas.width / CONFIG.GRID_COLS);
-    const tileH = Math.floor(canvas.height / CONFIG.GRID_ROWS);
-    tileSize = Math.max(1, Math.min(tileW, tileH));
-    offsetX = Math.floor((canvas.width  - (CONFIG.GRID_COLS * tileSize)) / 2);
-    offsetY = Math.floor((canvas.height - (CONFIG.GRID_ROWS * tileSize)) / 2);
+    // Divide first, then floor once — avoids the compounding rounding loss
+    // that came from flooring tileW and tileH separately before taking the min.
+    tileSize = Math.max(1, Math.floor(Math.min(
+        canvas.width  / CONFIG.GRID_COLS,
+        canvas.height / CONFIG.GRID_ROWS
+    )));
+    offsetX = Math.floor((canvas.width  - CONFIG.GRID_COLS * tileSize) / 2);
+    offsetY = Math.floor((canvas.height - CONFIG.GRID_ROWS * tileSize) / 2);
 }
 
 // Strata colours for the vertical cliff face. Picks darker bands as Z
@@ -219,15 +222,20 @@ function groupDupesByRow() {
 function drawDupesInRow(rowBucket) {
     for (const d of rowBucket) {
         const gx = Math.floor(d.x), gy = Math.floor(d.y);
-        const tile = tileAt(gx, gy);
-        const z = tile ? tile.z : 0;
-        // Smooth horizontal motion (d.x float), but vertical anchor is
-        // pinned to the dupe's tile row at 65% down — this guarantees
-        // the foot anchor never falls into the next tile row, which is
-        // drawn AFTER the dupes in this row and would otherwise paint
-        // over the legs.
+        // Interpolate Z elevation smoothly using the fractional part of d.y
+        // so the vertical anchor moves continuously as the dupe crosses rows.
+        // Without this, py snaps discretely every time Math.floor(d.y) changes,
+        // which is the teleport: smooth X but stepped Y.
+        const tileHere  = tileAt(gx, gy);
+        const tileSouth = tileAt(gx, gy + 1);
+        const zHere  = tileHere  ? tileHere.z  : 0;
+        const zSouth = tileSouth ? tileSouth.z : zHere;
+        const fy = d.y - gy;                          // fraction into this row [0,1)
+        const z = zHere + (zSouth - zHere) * fy;      // lerp Z between rows
+
+        // Both axes now use float position: fully smooth in X and Y.
         const px = offsetX + d.x * tileSize;
-        const py = offsetY + gy * tileSize + tileSize * 0.65 - z * CONFIG.Z_MULT;
+        const py = offsetY + d.y * tileSize - z * CONFIG.Z_MULT;
         const unit = Math.max(0.6, tileSize / 6);
         drawDupe(ctx, d, px, py, unit);
     }
