@@ -40,11 +40,11 @@ function smoothstep(x) {
 function pickLandShape() {
     const cols = CONFIG.GRID_COLS, rows = CONFIG.GRID_ROWS;
 
-    // Seeded centre offset — islands aren't always dead-centre.
-    const offX = (hash(1, 0) - 0.5) * cols * 0.25;
-    const offY = (hash(2, 0) - 0.5) * rows * 0.25;
-    const cx = cols * 0.5 + offX;
-    const cy = rows * 0.5 + offY;
+    // Always centred on the grid — the domain warp and fbm modulation provide
+    // all the positional variety needed; shifting the centre just pushes land
+    // off-screen and wastes playable space.
+    const cx = cols * 0.5;
+    const cy = rows * 0.5;
 
     const archetype = Math.floor(hash(3, 0) * 6);
 
