@@ -1,5 +1,5 @@
 /* ============================================================
- * config.js — all tunable constants and palettes. No logic.
+ * config.js — all tunable constants and palettes.
  * ============================================================ */
 
 const CONFIG = {
@@ -8,40 +8,46 @@ const CONFIG = {
     Z_MULT: 3,
     DUPE_COUNT: 12,
 
-    TREE_DENSITY_THRESHOLD: 0.48,
-    TREE_SEED_GATE: 0.55,
+    TREE_DENSITY_THRESHOLD: 0.45,
+    TREE_SEED_GATE: 0.52,
     TREE_ROCK_CLEARANCE: 2,
 
     RIVER_COUNT_MIN: 1,
     RIVER_COUNT_MAX: 3,
     RAVINE_COUNT_MIN: 1,
-    RAVINE_COUNT_MAX: 3,
+    RAVINE_COUNT_MAX: 2,
 
     JOB_TICKS: {
-        chop:         120,
-        mine:         200,
-        farm:         300,
-        build_bridge: 280,
-        build_boat:   400,
-        plant_tree:   180,   // replanting after chop
+        chop:         100,
+        mine:         180,
+        farm:         260,
+        build_bridge: 240,
+        build_boat:   360,
+        plant_tree:   150,
+        build_house:  450,
+        build_dock:   180,
     },
-    JOB_SPAWN_INTERVAL: 420,
-    JOB_MAX: 20,
+    JOB_SPAWN_INTERVAL: 360,
+    JOB_MAX: 28,
 
-    // Max farm tiles in one cluster; hard limit of 2 clusters per world.
-    FARM_CLUSTER_SIZE: 12,
-    FARM_CLUSTER_MAX:  2,
+    CHOP_CONCURRENT: 5,     // max simultaneous chop jobs
 
-    // How many ticks for a planted tree to reach full size.
-    TREE_GROW_TICKS: 1800,
-    // How many ticks for a farm tile to cycle seed→sprout→ripe→harvested.
-    CROP_GROW_TICKS: 900,
+    FARM_CLUSTER_SIZE: 14,
+    FARM_CLUSTER_MAX: 2,
 
-    // Max bridges that can ever be built in this world.
-    BRIDGE_MAX: 8,
+    TREE_GROW_TICKS: 1600,
+    CROP_GROW_TICKS: 800,
 
-    BOAT_SPEED: 0.007,
+    BRIDGE_MAX: 16,
+    BOAT_SPEED: 0.010,
+    BOAT_MIN: 2,
     STOCKPILE_SPREAD: 10,
+
+    HOUSE_MAX: 6,
+    DOCK_MAX: 3,
+
+    // One full day/night cycle in ticks (~60 seconds at 60fps).
+    DAY_TICKS: 3600,
 };
 
 const PALETTE = {
@@ -57,6 +63,8 @@ const PALETTE = {
     ravine_void:  { top: '#080808', front: '#050505', z: -3 },
     farm:         { top: '#8b6914', front: '#5a4010', z:  2 },
     bridge:       { top: '#8a6840', front: '#5a4428', z:  1 },
+    dock:         { top: '#7a6030', front: '#5a4020', z:  1 },
+    house:        { top: '#c8a878', front: '#6a4828', z:  4 },
 };
 
 const TREE_PALETTE = {
@@ -81,7 +89,6 @@ const DUPE_PALETTE = {
     nameTagFg:  '#cfd8dc',
 };
 
-// Used only for the dupe progress bar colour while working.
 const JOB_PALETTE = {
     chop:         'rgba(220,160,60,0.9)',
     mine:         'rgba(160,160,200,0.9)',
@@ -89,6 +96,8 @@ const JOB_PALETTE = {
     build_bridge: 'rgba(160,120,60,0.9)',
     build_boat:   'rgba(60,140,200,0.9)',
     plant_tree:   'rgba(80,160,80,0.9)',
+    build_house:  'rgba(200,140,80,0.9)',
+    build_dock:   'rgba(120,100,60,0.9)',
 };
 
 const RESOURCE_PALETTE = {
@@ -110,15 +119,33 @@ const BOAT_PALETTE = {
 const STOCKPILE_PALETTE = {
     ground:        '#5a4828',
     groundEdge:    '#3a2a18',
-    logA:          '#7a5030',
-    logB:          '#5a3818',
-    logEnd:        '#9a6840',
+    logA:          '#6a4420',
+    logB:          '#4a2c10',
+    logEnd:        '#c8905a',
+    logEndDark:    '#8a5830',
     oreA:          '#909090',
     oreB:          '#b0b0c8',
     oreShine:      '#d0d0e8',
     grainSack:     '#d0b060',
     grainSackDark: '#a08040',
     grainStitch:   '#c09030',
+};
+
+const HOUSE_PALETTE = {
+    roofRidge:   '#4a3020',
+    roofA:       '#7a5030',
+    roofB:       '#6a4428',
+    roofLight:   '#9a6840',
+    wallTop:     '#c8a878',
+    wallStone:   '#a88858',
+    wallFront:   '#6a4828',
+    wallWindow:  '#2a3848',
+    wallWindowFr:'#c8c0a0',
+    chimney:     '#7a6858',
+    chimneyTop:  '#4a3828',
+    door:        '#3a2010',
+    doorFrame:   '#8a6030',
+    smoke:       'rgba(180,170,160,',
 };
 
 const DUPE_NAMES = [
@@ -128,5 +155,5 @@ const DUPE_NAMES = [
 ];
 
 const WALKABLE_TYPES = new Set([
-    'sand','sandstone','grass','grass_dark','stone','farm','bridge',
+    'sand','sandstone','grass','grass_dark','stone','farm','bridge','dock',
 ]);

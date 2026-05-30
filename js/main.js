@@ -1,6 +1,7 @@
 /* ============================================================
- * main.js
- * Boots the world and runs the loop.
+ * main.js — boot, loop.
+ * resize() is called AFTER regenerate() so that offsetX/Y
+ * are computed with the correct landCX/landCY from jobs.js.
  * ============================================================ */
 
 let animFrameId = null;
@@ -8,13 +9,14 @@ let animFrameId = null;
 function regenerate() {
     generateMap();
     spawnDupes();
-    initJobs();   // clear old jobs/boats/resources, spawn first wave
+    initJobs();
+    resize();   // re-centre after landCX/CY are known
 }
 
 function animate() {
     tick++;
-    updateJobs();     // job queue, boats, resource decay
-    updateDupes();    // dupe AI (picks jobs, walks, works)
+    updateJobs();
+    updateDupes();
     render();
     animFrameId = requestAnimationFrame(animate);
 }
