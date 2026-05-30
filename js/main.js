@@ -1,7 +1,6 @@
 /* ============================================================
  * main.js
- * Boots the world and runs the loop. Everything else is in the
- * other files; this one just wires them together.
+ * Boots the world and runs the loop.
  * ============================================================ */
 
 let animFrameId = null;
@@ -9,11 +8,13 @@ let animFrameId = null;
 function regenerate() {
     generateMap();
     spawnDupes();
+    initJobs();   // clear old jobs/boats/resources, spawn first wave
 }
 
 function animate() {
     tick++;
-    updateDupes();
+    updateJobs();     // job queue, boats, resource decay
+    updateDupes();    // dupe AI (picks jobs, walks, works)
     render();
     animFrameId = requestAnimationFrame(animate);
 }

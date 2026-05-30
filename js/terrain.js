@@ -26,12 +26,10 @@ function tileAt(x, y) {
 
 // ---------- Pass 1: base terrain ----------------------------
 
-// Single circular blob contribution.
 function radialBlob(wx, wy, cx, cy, r) {
     return 1 - Math.hypot(wx - cx, wy - cy) / r;
 }
 
-// Smooth ramp: 0 at x<=0, 1 at x>=1, cubic ease between.
 function smoothstep(x) {
     const t = Math.max(0, Math.min(1, x));
     return t * t * (3 - 2 * t);
@@ -39,24 +37,16 @@ function smoothstep(x) {
 
 function pickLandShape() {
     const cols = CONFIG.GRID_COLS, rows = CONFIG.GRID_ROWS;
-
-    // Always centred on the grid — the domain warp and fbm modulation provide
-    // all the positional variety needed; shifting the centre just pushes land
-    // off-screen and wastes playable space.
     const cx = cols * 0.5;
     const cy = rows * 0.5;
-
     const archetype = Math.floor(hash(3, 0) * 6);
 
     if (archetype === 0) {
-        // Large single island.
         const r = 36 + hash(4, 0) * 10;
         return (wx, wy) => radialBlob(wx, wy, cx, cy, r);
     }
 
     if (archetype === 1) {
-        // Elongated landmass — Iceland / Japan shape.
-        // High stretch ratio + random rotation fills the viewport edge-to-edge.
         const stretch = 2.6 + hash(4, 0) * 1.6;
         const r = 28 + hash(5, 0) * 10;
         const angle = hash(6, 0) * Math.PI;
@@ -70,7 +60,6 @@ function pickLandShape() {
     }
 
     if (archetype === 2) {
-        // Twin landmasses with a visible strait.
         const sep = 32 + hash(4, 0) * 20;
         const ang = hash(5, 0) * Math.PI * 2;
         const c1x = cx + Math.cos(ang) * sep * 0.5;
@@ -86,14 +75,10 @@ function pickLandShape() {
     }
 
     if (archetype === 3) {
-        // Peninsulas — a meaty core with 3-4 full-sized lobes that create
-        // genuine fjords and headlands between them. Lobes at full weight (1.0)
-        // so they actually read as land, not just a bumpy coastline.
         const coreR = 24 + hash(4, 0) * 8;
         const lobeCount = 3 + Math.floor(hash(5, 0) * 2);
         const lobes = [];
         for (let i = 0; i < lobeCount; i++) {
-            // Space lobes unevenly so they don't form a symmetrical star.
             const ang = (i / lobeCount) * Math.PI * 2
                       + hash(6, i) * (Math.PI * 2 / lobeCount) * 0.7;
             const dist = coreR * (0.8 + hash(7, i) * 0.6);
@@ -110,8 +95,6 @@ function pickLandShape() {
     }
 
     if (archetype === 4) {
-        // Archipelago — 4-5 islands spread wide. Each island is large enough
-        // to feel inhabited; total land area similar to a single island.
         const count = 4 + Math.floor(hash(4, 0) * 2);
         const islands = [];
         for (let i = 0; i < count; i++) {
@@ -127,23 +110,17 @@ function pickLandShape() {
             Math.max(best, radialBlob(wx, wy, isl.cx, isl.cy, isl.r)), 0);
     }
 
-    // archetype === 5: drowned ridge — land emerges from a noise ridge
-    // rather than a blob, producing a jagged spinal shape like a submerged
-    // mountain range. Looks completely different from all the blob archetypes.
+    // archetype === 5: drowned ridge
     const ridgeAng = hash(4, 0) * Math.PI;
     const ridgeCos = Math.cos(ridgeAng), ridgeSin = Math.sin(ridgeAng);
-    const ridgeLen = 40 + hash(5, 0) * 30;   // half-length of the spine
-    const ridgeW   = 18 + hash(6, 0) * 10;   // width of the ridge
+    const ridgeLen = 40 + hash(5, 0) * 30;
+    const ridgeW   = 18 + hash(6, 0) * 10;
     return (wx, wy) => {
         const dx = wx - cx, dy = wy - cy;
-        // Along-spine and cross-spine distances.
         const along = dx * ridgeCos + dy * ridgeSin;
         const cross = -dx * ridgeSin + dy * ridgeCos;
-        // Falloff along the spine (caps the ends naturally).
         const spineT = 1 - Math.abs(along) / ridgeLen;
         if (spineT <= 0) return -1;
-        // Width varies along the spine using a low-freq noise so the ridge
-        // bulges and pinches rather than being a uniform sausage.
         const localW = ridgeW * (0.5 + smoothNoise(along * 0.03 + 7, 0) * 0.7);
         return 1 - Math.abs(cross) / localW;
     };
@@ -153,11 +130,7 @@ function generateBaseTerrain() {
     const landShape = pickLandShape();
     const cols = CONFIG.GRID_COLS, rows = CONFIG.GRID_ROWS;
 
-    // Per-axis safe-zone falloff: smoothstep over a MARGIN-tile band at each
-    // edge. Using smoothstep (not pow) gives a clear visible water border
-    // without a hard rectangular line. Multiplying X and Y falloffs together
-    // rounds the corners organically.
-    const MARGIN = 7;   // water border width in tiles — between old (10) and recent (4)
+    const MARGIN = 7;
     function edgeFalloff(x, y) {
         const fx = smoothstep(x / MARGIN) * smoothstep((cols - 1 - x) / MARGIN);
         const fy = smoothstep(y / MARGIN) * smoothstep((rows - 1 - y) / MARGIN);
@@ -168,8 +141,6 @@ function generateBaseTerrain() {
     for (let y = 0; y < rows; y++) {
         map[y] = [];
         for (let x = 0; x < cols; x++) {
-            // Two-pass domain warp: coarse bends the whole island, fine
-            // roughens the coastline.
             const coarseX = fbm(x * 0.025, y * 0.025, 3) * 22;
             const coarseY = fbm(x * 0.025 + 40, y * 0.025 + 40, 3) * 22;
             const fineX   = fbm(x * 0.07 + 80,  y * 0.07 + 80,  2) * 7;
@@ -179,14 +150,9 @@ function generateBaseTerrain() {
 
             let landBase = landShape(wx, wy);
 
-            // Large-scale fbm modulation — punches bays and builds headlands.
-            // Amplitude scales with landBase proximity to the coast (near 0)
-            // so bays are deep near the shoreline but don't erode the interior.
             const warpField = fbm(x * 0.04 + 200, y * 0.04 + 200, 4) - 0.5;
             const coastProximity = 1 - Math.abs(Math.min(1, Math.max(-1, landBase / 0.4)));
             landBase += warpField * 0.5 * coastProximity;
-
-            // Soft edge falloff — multiplied, not clamped, so no hard line.
             landBase *= edgeFalloff(x, y);
 
             let type = 'water';
@@ -226,7 +192,6 @@ function computeSeaDistanceMap() {
     const dist = Array.from({ length: rows }, () => new Array(cols).fill(9999));
     const queue = [];
 
-    // Seed BFS from every water tile on the canvas border.
     for (let y = 0; y < rows; y++) {
         for (let x = 0; x < cols; x++) {
             const onBorder = (x === 0 || x === cols - 1 || y === 0 || y === rows - 1);
@@ -263,7 +228,6 @@ function carveRivers(seaDist) {
 }
 
 function carveOneRiver(seaDist, riverIndex) {
-    // Find a high-elevation inland spring.
     let startX = 0, startY = 0, ok = false;
     for (let attempt = 0; attempt < 60 && !ok; attempt++) {
         const rx = 15 + Math.random() * (CONFIG.GRID_COLS - 30);
@@ -275,7 +239,6 @@ function carveOneRiver(seaDist, riverIndex) {
     }
     if (!ok) return;
 
-    // Walk toward the sea with momentum + a touch of fbm jitter.
     let x = startX, y = startY;
     const path = [[x, y]];
     let vx = 0, vy = 0;
@@ -286,7 +249,6 @@ function carveOneRiver(seaDist, riverIndex) {
             || iy < 0 || iy >= CONFIG.GRID_ROWS
             || seaDist[iy][ix] === 0) break;
 
-        // Sample 16 directions, pick the one with the biggest sea-distance drop.
         let bestAng = null, bestDrop = -1;
         for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) {
             const nx = x + Math.cos(a) * 2, ny = y + Math.sin(a) * 2;
@@ -298,7 +260,6 @@ function carveOneRiver(seaDist, riverIndex) {
         }
         if (bestAng === null) break;
 
-        // Momentum blend so the river curves rather than zig-zagging.
         vx = vx * 0.7 + Math.cos(bestAng) * 0.3;
         vy = vy * 0.7 + Math.sin(bestAng) * 0.3;
         const ang = Math.atan2(vy, vx) + (fbm(step * 0.05, riverIndex * 10, 1) * 0.5 - 0.25);
@@ -311,12 +272,6 @@ function carveOneRiver(seaDist, riverIndex) {
         } else break;
     }
 
-    // Apply the brush along the path.
-    // Core (d < 1.3): water.
-    // Bank (1.3 ≤ d < 2.5): gentle grass — but ONLY on tiles that are already
-    // inland grass. Never touch sand (coast), never touch existing water (ocean
-    // or pond), and never change a tile's z — that's what was creating the
-    // unnatural grass-on-beach ledges and ocean-adjacent grass patches.
     for (const [px, py] of path) {
         for (let cy = py - 3; cy <= py + 3; cy++) {
             for (let cx = px - 3; cx <= px + 3; cx++) {
@@ -326,17 +281,10 @@ function carveOneRiver(seaDist, riverIndex) {
                 if (d < 1.3) {
                     t.type = 'water'; t.z = PALETTE.water.z;
                 } else if (d < 2.5) {
-                    // Bank tiles: only soften inland grass/grass_dark.
-                    // Never write to sand, water, stone, or ravine tiles.
-                    // Never change z — just swap the type so no cliff appears.
                     if (t.type === 'grass_dark') {
-                        // Soften dark grass to regular grass near the bank.
-                        // Also bring z down to grass level so no cliff forms
-                        // between river edge and bank.
                         t.type = 'grass';
                         t.z = PALETTE.grass.z;
                     }
-                    // All other types (sand, water, stone, sandstone, ravine_*) are left alone.
                 }
             }
         }
@@ -352,9 +300,6 @@ function carveRavines() {
     }
 }
 
-// True if any tile within `r` of (cx, cy) is water. Used by the ravine
-// carver to leave a land buffer between chasms and rivers/sea, which
-// otherwise creates jarring water-on-cliff-edge artefacts.
 function hasWaterNearby(cx, cy, r) {
     for (let dy = -r; dy <= r; dy++) {
         for (let dx = -r; dx <= r; dx++) {
@@ -384,26 +329,21 @@ function carveOneRavine(ravineIndex) {
         const ix = Math.floor(rx), iy = Math.floor(ry);
         const cur = tileAt(ix, iy);
         if (!cur) break;
-        // Stop if we've punched out to the ocean.
         if (cur.z <= PALETTE.water.z && cur.type !== 'ravine_void') break;
 
-        // Brush a band 8 tiles wide; carving deepest at the centre.
         for (let cy = iy - 8; cy <= iy + 8; cy++) {
             for (let cx = ix - 8; cx <= ix + 8; cx++) {
                 const t = tileAt(cx, cy);
                 if (!t) continue;
-                // Never overwrite water — keeps coastlines & rivers intact.
                 if (t.type === 'water') continue;
 
                 const d = Math.hypot(cx - rx, cy - ry)
                         + (smoothNoise(cx * 0.3, cy * 0.3) - 0.5) * 1.5;
 
-                // Sand at the chasm edge bakes into sandstone.
                 if (t.type === 'sand' && d < 3.5) {
                     t.type = 'sandstone'; t.z = PALETTE.sandstone.z;
                 }
 
-                // Soften surrounding cliffs.
                 if (d < 7.0) {
                     if (t.z >= PALETTE.stone.z) {
                         t.type = 'grass_dark'; t.z = PALETTE.grass_dark.z;
@@ -412,9 +352,6 @@ function carveOneRavine(ravineIndex) {
                     }
                 }
 
-                // The chasm itself, deepest first so darker rings overwrite lighter ones.
-                // Skip the deep carving if water is close — this prevents rivers
-                // and the sea from butting up against ravine cliffs, which looks bad.
                 if (hasWaterNearby(cx, cy, 2)) continue;
                 if (d < 1.5) {
                     t.type = 'ravine_void';  t.z = PALETTE.ravine_void.z;
@@ -429,7 +366,6 @@ function carveOneRavine(ravineIndex) {
 }
 
 // ---------- Pass 5: waterfalls ------------------------------
-// Any water tile that sits directly north of a lower tile spills.
 function detectWaterfalls() {
     for (let y = 0; y < CONFIG.GRID_ROWS - 1; y++) {
         for (let x = 0; x < CONFIG.GRID_COLS; x++) {
@@ -442,7 +378,6 @@ function detectWaterfalls() {
 }
 
 // ---------- Pass 6: stone cleanup ---------------------------
-// Lonely stone tiles with no stone neighbours get demoted to grass.
 function cleanupOrphanStone() {
     for (let y = 1; y < CONFIG.GRID_ROWS - 1; y++) {
         for (let x = 1; x < CONFIG.GRID_COLS - 1; x++) {
@@ -477,7 +412,6 @@ function computeShadows() {
 }
 
 // ---------- Pass 8: flora placement -------------------------
-// Trees prefer grass, stay clear of rock/ravine, cluster via fbm density.
 function placeFlora() {
     const clearance = CONFIG.TREE_ROCK_CLEARANCE;
     for (let y = 0; y < CONFIG.GRID_ROWS; y++) {
@@ -489,8 +423,6 @@ function placeFlora() {
             if (density <= CONFIG.TREE_DENSITY_THRESHOLD) continue;
             if (t.seed <= CONFIG.TREE_SEED_GATE) continue;
 
-            // Reject anything within `clearance` of stone/ravine — keeps
-            // forests visually distinct from rocky areas.
             let blocked = false;
             for (let dy = -clearance; dy <= clearance && !blocked; dy++) {
                 for (let dx = -clearance; dx <= clearance && !blocked; dx++) {
