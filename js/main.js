@@ -8,9 +8,9 @@ let animFrameId = null;
 
 function regenerate() {
     generateMap();
-    spawnDupes();
-    initJobs();
-    resize();   // re-centre after landCX/CY are known
+    initJobs();     // builds island components/zones first…
+    spawnDupes();   // …so dupes can spawn per-island (castaways)
+    resize();       // re-centre after landCX/CY are known
 }
 
 function animate() {

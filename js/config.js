@@ -39,8 +39,11 @@ const CONFIG = {
     CROP_GROW_TICKS: 800,
 
     BRIDGE_MAX: 16,
-    BOAT_SPEED: 0.010,
-    BOAT_MIN: 2,
+    BOAT_SPEED: 0.024,
+    BOAT_MAX: 3,
+    BOAT_LOG_COST: 4,
+    STRANDED_MAX: 2,
+    STRANDED_ISLAND_MIN: 25,   // tiles a secondary island needs to host a castaway
     STOCKPILE_SPREAD: 10,
 
     HOUSE_MAX: 6,
@@ -132,6 +135,10 @@ const STOCKPILE_PALETTE = {
 };
 
 const HOUSE_PALETTE = {
+    foundation:  '#9a8868',
+    plaster:     '#d8c8a0',
+    timber:      '#5a3c22',
+    windowGlow:  '#ffb84a',
     roofRidge:   '#4a3020',
     roofA:       '#7a5030',
     roofB:       '#6a4428',

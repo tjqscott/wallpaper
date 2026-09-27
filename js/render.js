@@ -114,8 +114,13 @@ function drawFarm(px,py,drawY,seed,growthTick) {
 // ---------- Bridge ------------------------------------------
 function drawBridge(px,py,drawY,tx,ty) {
     const t=tileSize;
-    const wW=tileAt(tx-1,ty),wE=tileAt(tx+1,ty);
-    const isEW=(wW&&WALKABLE_TYPES.has(wW.type))&&(wE&&WALKABLE_TYPES.has(wE.type));
+    const tile=tileAt(tx,ty);
+    let isEW;
+    if (tile&&tile.bridgeAxis) isEW=tile.bridgeAxis==='h';
+    else {
+        const wW=tileAt(tx-1,ty),wE=tileAt(tx+1,ty);
+        isEW=!!((wW&&WALKABLE_TYPES.has(wW.type))&&(wE&&WALKABLE_TYPES.has(wE.type)));
+    }
     const pc=Math.max(2,Math.floor(t/3.5));
     ctx.fillStyle=BOAT_PALETTE.hullDark;
     if (isEW) {
@@ -154,93 +159,117 @@ function drawDock(px,py,drawY,tx,ty) {
 }
 
 // ---------- House -------------------------------------------
+function houseFullyBuilt(ox,oy,w,h) {
+    for (let dy=0;dy<h;dy++) for (let dx=0;dx<w;dx++) {
+        const nt=tileAt(ox+dx,oy+dy);
+        if (!nt||nt.type!=='house') return false;
+    }
+    return true;
+}
+
+// Per-tile pass only draws the construction scaffold. Finished
+// houses are drawn as one composite sprite in drawHouse().
 function drawHouseTile(px,py,drawY,tx,ty) {
     const tile=tileAt(tx,ty); if (!tile) return;
-    const ox=tile.houseOriginX,oy=tile.houseOriginY;
-    const w=tile.houseW||3,h=tile.houseH||2;
-    const hx=tx-ox,hy=ty-oy;
+    if (houseFullyBuilt(tile.houseOriginX,tile.houseOriginY,tile.houseW||3,tile.houseH||2)) return;
     const t=tileSize;
+    ctx.fillStyle='rgba(160,120,60,0.5)'; ctx.fillRect(px,drawY,t,t);
+    ctx.fillStyle='rgba(80,50,20,0.7)';
+    ctx.fillRect(px,drawY,t,Math.max(1,t*0.08));
+    ctx.fillRect(px,drawY+t-Math.max(1,t*0.08),t,Math.max(1,t*0.08));
+    ctx.fillRect(px,drawY,Math.max(1,t*0.08),t);
+    ctx.fillRect(px+t-Math.max(1,t*0.08),drawY,Math.max(1,t*0.08),t);
+}
 
-    // Check all tiles built.
-    let fullyBuilt=true;
-    for (let dy=0;dy<h&&fullyBuilt;dy++) for (let dx=0;dx<w&&fullyBuilt;dx++) {
-        const nt=tileAt(ox+dx,oy+dy);
-        if (!nt||nt.type!=='house') fullyBuilt=false;
-    }
-    if (!fullyBuilt) {
-        ctx.fillStyle='rgba(160,120,60,0.5)'; ctx.fillRect(px,drawY,t,t);
-        ctx.fillStyle='rgba(80,50,20,0.7)';
-        ctx.fillRect(px,drawY,t,Math.max(1,t*0.08));
-        ctx.fillRect(px,drawY+t-Math.max(1,t*0.08),t,Math.max(1,t*0.08));
-        ctx.fillRect(px,drawY,Math.max(1,t*0.08),t);
-        ctx.fillRect(px+t-Math.max(1,t*0.08),drawY,Math.max(1,t*0.08),t);
-        return;
+// Composite cottage sprite anchored at the house origin. Drawn when
+// the row loop reaches the house's south row so Y-sorting holds.
+function drawHouse(h) {
+    if (!houseFullyBuilt(h.x,h.y,h.w,h.h)) return;
+    const t=tileSize;
+    const origin=tileAt(h.x,h.y);
+    const z=(h.z!==undefined?h.z:(origin?origin.z:2));
+    const px=offsetX+h.x*t, py=offsetY+h.y*t-z*CONFIG.Z_MULT;
+    const W=h.w*t, H=h.h*t;
+    const groundY=py+H;
+
+    // Ground shadow.
+    ctx.fillStyle='rgba(0,0,0,0.22)';
+    ctx.beginPath(); ctx.ellipse(px+W/2,groundY-t*0.06,W*0.56,t*0.26,0,0,Math.PI*2); ctx.fill();
+
+    // Front wall (plaster + timber frame).
+    const wallH=t*0.92, wallTopY=groundY-wallH;
+    const wx0=px+t*0.06, wx1=px+W-t*0.06, wW=wx1-wx0;
+    ctx.fillStyle=HOUSE_PALETTE.plaster; ctx.fillRect(wx0,wallTopY,wW,wallH);
+    // Stone footing.
+    ctx.fillStyle=HOUSE_PALETTE.wallStone;
+    ctx.fillRect(wx0,groundY-Math.max(2,t*0.14),wW,Math.max(2,t*0.14));
+    ctx.fillStyle='rgba(0,0,0,0.18)';
+    ctx.fillRect(wx0,groundY-Math.max(2,t*0.14),wW,Math.max(1,t*0.04));
+    // Timber: corner posts, eave beam, studs.
+    const tb=Math.max(1,t*0.09);
+    ctx.fillStyle=HOUSE_PALETTE.timber;
+    ctx.fillRect(wx0,wallTopY,tb,wallH);
+    ctx.fillRect(wx1-tb,wallTopY,tb,wallH);
+    ctx.fillRect(wx0,wallTopY,wW,tb);
+    ctx.fillRect(wx0+wW*0.33-tb/2,wallTopY,tb,wallH*0.55);
+    ctx.fillRect(wx0+wW*0.67-tb/2,wallTopY,tb,wallH*0.55);
+
+    // Door — centre of the front wall.
+    const dw=Math.max(3,t*0.42), dh=Math.max(4,t*0.62);
+    const dx0=px+W/2-dw/2, dy0=groundY-dh-t*0.02;
+    ctx.fillStyle=HOUSE_PALETTE.doorFrame; ctx.fillRect(dx0-tb*0.6,dy0-tb*0.6,dw+tb*1.2,dh+tb*0.6);
+    ctx.fillStyle=HOUSE_PALETTE.door; ctx.fillRect(dx0,dy0,dw,dh);
+    ctx.fillStyle='rgba(255,255,255,0.08)'; ctx.fillRect(dx0+dw*0.15,dy0+dh*0.1,dw*0.28,dh*0.8);
+    ctx.fillStyle=HOUSE_PALETTE.doorFrame;
+    ctx.fillRect(dx0+dw*0.72,dy0+dh*0.45,Math.max(1,dw*0.12),Math.max(1,dh*0.12));
+
+    // Windows — left and right of the door, warm-lit at night.
+    const dark=nightDarkness();
+    const ww=Math.max(3,t*0.4), wh=Math.max(3,t*0.34);
+    for (const wxc of [px+W*0.19, px+W*0.81]) {
+        const wx2=wxc-ww/2, wy2=wallTopY+wallH*0.3;
+        ctx.fillStyle=HOUSE_PALETTE.wallWindowFr; ctx.fillRect(wx2-1,wy2-1,ww+2,wh+2);
+        ctx.fillStyle=dark>0.3?HOUSE_PALETTE.windowGlow:HOUSE_PALETTE.wallWindow;
+        ctx.fillRect(wx2,wy2,ww,wh);
+        ctx.fillStyle=HOUSE_PALETTE.wallWindowFr;
+        ctx.fillRect(wx2+ww/2-Math.max(1,t*0.025),wy2,Math.max(1,t*0.05),wh);
+        ctx.fillRect(wx2,wy2+wh/2-Math.max(1,t*0.025),ww,Math.max(1,t*0.05));
+        if (dark<=0.3) {
+            ctx.fillStyle='rgba(200,230,255,0.3)';
+            ctx.fillRect(wx2+1,wy2+1,Math.floor(ww*0.3),Math.floor(wh*0.3));
+        }
     }
 
-    if (hy===0) {
-        // Roof top.
-        if (hx<Math.floor(w/2)) {
-            ctx.fillStyle=HOUSE_PALETTE.roofB; ctx.fillRect(px,drawY,t,t);
-            ctx.fillStyle=HOUSE_PALETTE.roofA; ctx.fillRect(px,drawY,t,Math.floor(t*0.55));
-            ctx.fillStyle='rgba(0,0,0,0.18)';
-            for (let r=1;r<4;r++) ctx.fillRect(px,drawY+r*Math.floor(t*0.14),t,Math.max(1,t*0.05));
-        } else if (hx===Math.floor(w/2)) {
-            ctx.fillStyle=HOUSE_PALETTE.roofA; ctx.fillRect(px,drawY,t,t);
-            ctx.fillStyle=HOUSE_PALETTE.roofRidge; ctx.fillRect(px+t*0.3,drawY,t*0.4,t);
-            ctx.fillStyle='rgba(0,0,0,0.15)';
-            for (let r=0;r<5;r++) ctx.fillRect(px,drawY+r*Math.floor(t*0.2),t,Math.max(1,t*0.06));
-        } else {
-            ctx.fillStyle=HOUSE_PALETTE.roofB; ctx.fillRect(px,drawY,t,t);
-            ctx.fillStyle='rgba(0,0,0,0.18)';
-            for (let r=1;r<4;r++) ctx.fillRect(px,drawY+r*Math.floor(t*0.14),t,Math.max(1,t*0.05));
-        }
-        if (hx===0||hx===w-1) {
-            ctx.fillStyle=HOUSE_PALETTE.wallTop;
-            ctx.fillRect(px,drawY+Math.floor(t*0.6),t,Math.floor(t*0.4));
-        }
-        // Chimney + smoke.
-        if (hx===1&&hy===0) {
-            const cw=Math.max(3,t*0.22),ch=Math.max(3,t*0.28);
-            const cx2=px+t*0.62,cy2=drawY+t*0.05;
-            ctx.fillStyle=HOUSE_PALETTE.chimney; ctx.fillRect(cx2,cy2,cw,ch);
-            ctx.fillStyle=HOUSE_PALETTE.chimneyTop; ctx.fillRect(cx2-1,cy2,cw+2,Math.max(1,ch*0.22));
-            if (tick%80<40) {
-                const sa=(Math.sin(tick*0.04)*0.3+0.4);
-                ctx.fillStyle=HOUSE_PALETTE.smoke+sa+')';
-                ctx.beginPath(); ctx.arc(cx2+cw/2,cy2-Math.max(2,t*0.15),Math.max(2,t*0.13),0,Math.PI*2); ctx.fill();
-                ctx.fillStyle=HOUSE_PALETTE.smoke+(sa*0.6)+')';
-                ctx.beginPath(); ctx.arc(cx2+cw/2+1,cy2-Math.max(2,t*0.28),Math.max(2,t*0.10),0,Math.PI*2); ctx.fill();
-            }
-        }
-    } else {
-        // South row — eave + wall top + door/windows.
-        const eaveH=Math.max(2,t*0.22);
-        ctx.fillStyle=HOUSE_PALETTE.roofA; ctx.fillRect(px,drawY,t,eaveH);
-        ctx.fillStyle='rgba(0,0,0,0.22)'; ctx.fillRect(px,drawY+eaveH-Math.max(1,t*0.05),t,Math.max(1,t*0.05));
-        ctx.fillStyle=HOUSE_PALETTE.wallTop; ctx.fillRect(px,drawY+eaveH,t,t-eaveH);
-        ctx.fillStyle=HOUSE_PALETTE.wallStone; ctx.fillRect(px,drawY+eaveH,t,Math.max(1,t*0.06));
-        const ms=Math.max(4,Math.floor(t*0.35));
-        for (let mx=px+(hx%2)*ms/2;mx<px+t;mx+=ms)
-            ctx.fillRect(mx,drawY+eaveH,Math.max(1,t*0.05),t-eaveH);
-        if (hx===Math.floor(w/2)) {
-            const dw=Math.max(3,t*0.32),dh=Math.max(3,t*0.28);
-            const dx2=px+t*0.5-dw/2,dy2=drawY+t-dh+t*0.04;
-            ctx.fillStyle=HOUSE_PALETTE.doorFrame; ctx.fillRect(dx2-1,dy2-1,dw+2,dh+1);
-            ctx.fillStyle=HOUSE_PALETTE.door; ctx.fillRect(dx2,dy2,dw,dh);
-            ctx.fillStyle=HOUSE_PALETTE.doorFrame;
-            ctx.fillRect(dx2+dw*0.68,dy2+dh*0.42,Math.max(1,dw*0.12),Math.max(1,dh*0.16));
-        }
-        if (hx===0||hx===w-1) {
-            const ww=Math.max(3,t*0.30),wh=Math.max(3,t*0.22);
-            const wx2=px+t*0.5-ww/2,wy2=drawY+t*0.55;
-            ctx.fillStyle=HOUSE_PALETTE.wallWindowFr; ctx.fillRect(wx2-1,wy2-1,ww+2,wh+2);
-            ctx.fillStyle=HOUSE_PALETTE.wallWindow; ctx.fillRect(wx2,wy2,ww,wh);
-            ctx.fillStyle=HOUSE_PALETTE.wallWindowFr;
-            ctx.fillRect(wx2+ww/2-Math.max(1,t*0.03),wy2,Math.max(1,t*0.05),wh);
-            ctx.fillRect(wx2,wy2+wh/2-Math.max(1,t*0.03),ww,Math.max(1,t*0.05));
-            ctx.fillStyle='rgba(200,230,255,0.25)';
-            ctx.fillRect(wx2+2,wy2+2,Math.floor(ww*0.35),Math.floor(wh*0.35));
-        }
+    // Gabled roof — back slope, ridge, front slope with shingles.
+    const over=t*0.14;
+    const rx0=px-over, rx1=px+W+over, rW=rx1-rx0;
+    const roofTopY=py-t*0.22, ridgeY=py+t*0.34, eaveY=wallTopY+t*0.1;
+    ctx.fillStyle=HOUSE_PALETTE.roofB; ctx.fillRect(rx0,roofTopY,rW,ridgeY-roofTopY);
+    ctx.fillStyle='rgba(0,0,0,0.15)'; ctx.fillRect(rx0,roofTopY,rW,Math.max(1,t*0.06));
+    ctx.fillStyle=HOUSE_PALETTE.roofA; ctx.fillRect(rx0,ridgeY,rW,eaveY-ridgeY);
+    ctx.fillStyle=HOUSE_PALETTE.roofLight; ctx.fillRect(rx0,ridgeY+t*0.05,rW,Math.max(1,t*0.07));
+    ctx.fillStyle='rgba(0,0,0,0.16)';
+    const rows2=Math.max(2,Math.floor((eaveY-ridgeY)/(t*0.24)));
+    for (let r=1;r<=rows2;r++)
+        ctx.fillRect(rx0,ridgeY+r*(eaveY-ridgeY)/(rows2+0.3),rW,Math.max(1,t*0.05));
+    // Ridge cap + eave shadow on the wall.
+    ctx.fillStyle=HOUSE_PALETTE.roofRidge;
+    ctx.fillRect(rx0-t*0.04,ridgeY-Math.max(1,t*0.07),rW+t*0.08,Math.max(2,t*0.12));
+    ctx.fillStyle='rgba(0,0,0,0.25)'; ctx.fillRect(rx0,eaveY-Math.max(1,t*0.05),rW,Math.max(1,t*0.05));
+    ctx.fillStyle='rgba(0,0,0,0.20)'; ctx.fillRect(wx0,eaveY,wW,Math.max(1,t*0.10));
+
+    // Chimney on the back slope + smoke.
+    const cw=Math.max(3,t*0.24), ch=Math.max(4,t*0.42);
+    const cx2=px+W*0.72, cy2=roofTopY-ch*0.55;
+    ctx.fillStyle=HOUSE_PALETTE.chimney; ctx.fillRect(cx2,cy2,cw,ch);
+    ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(cx2+cw*0.6,cy2,cw*0.4,ch);
+    ctx.fillStyle=HOUSE_PALETTE.chimneyTop; ctx.fillRect(cx2-1,cy2,cw+2,Math.max(1,ch*0.2));
+    if (tick%80<40) {
+        const sa=(Math.sin(tick*0.04+h.x)*0.3+0.4);
+        ctx.fillStyle=HOUSE_PALETTE.smoke+sa+')';
+        ctx.beginPath(); ctx.arc(cx2+cw/2,cy2-Math.max(2,t*0.15),Math.max(2,t*0.13),0,Math.PI*2); ctx.fill();
+        ctx.fillStyle=HOUSE_PALETTE.smoke+(sa*0.6)+')';
+        ctx.beginPath(); ctx.arc(cx2+cw/2+1,cy2-Math.max(2,t*0.30),Math.max(2,t*0.10),0,Math.PI*2); ctx.fill();
     }
 }
 
@@ -432,10 +461,14 @@ function drawCampfire(cf) {
 }
 
 // ---------- Day/night overlay + campfire point lights --------
-function drawNightOverlay() {
+// Darkness: 0 at noon, 1 at midnight. Shared by overlay and sprites.
+function nightDarkness() {
     const phase=getDayPhase(); // 0=dawn, 0.25=noon, 0.5=midnight, 0.75=pre-dawn
-    // Convert to darkness: 0 at noon, 1 at midnight.
-    const darkness = Math.pow(Math.max(0, Math.cos((phase-0.25)*Math.PI*2)*-0.5+0.5), 1.4);
+    return Math.pow(Math.max(0, Math.cos((phase-0.25)*Math.PI*2)*-0.5+0.5), 1.4);
+}
+
+function drawNightOverlay() {
+    const darkness=nightDarkness();
     if (darkness<0.02) return; // fully day — skip
 
     // Base night overlay.
@@ -510,28 +543,16 @@ function drawTile(x,y) {
                 ctx.fillStyle=`rgba(200,230,255,${0.15+f*0.45})`;
                 ctx.fillRect(px+tileSize*0.25,drawY+tileSize+layer*CONFIG.Z_MULT,tileSize*0.5,CONFIG.Z_MULT+0.5);
             }
-            if (tile.type==='house') {
-                ctx.fillStyle=HOUSE_PALETTE.wallFront;
-                ctx.fillRect(px,drawY+tileSize+layer*CONFIG.Z_MULT,tileSize+0.5,CONFIG.Z_MULT+0.5);
-                if (layer%2===0) { ctx.fillStyle='rgba(0,0,0,0.18)'; ctx.fillRect(px,drawY+tileSize+layer*CONFIG.Z_MULT,tileSize+0.5,Math.max(1,CONFIG.Z_MULT*0.2)); }
-                if (layer===0) {
-                    const wo=tile.houseOriginX,ww=tile.houseW||3,hx2=x-wo;
-                    if (hx2===0||hx2===ww-1) {
-                        const winW=Math.max(2,tileSize*0.28),winH=Math.max(2,CONFIG.Z_MULT*0.6);
-                        const winX=px+tileSize*0.36,winY=drawY+tileSize+CONFIG.Z_MULT*0.2;
-                        ctx.fillStyle=HOUSE_PALETTE.wallWindowFr; ctx.fillRect(winX-1,winY-1,winW+2,winH+2);
-                        ctx.fillStyle=HOUSE_PALETTE.wallWindow;   ctx.fillRect(winX,winY,winW,winH);
-                    }
-                }
-            }
         }
         ctx.fillStyle='rgba(0,0,0,0.25)'; ctx.fillRect(px,drawY+tileSize,tileSize,1);
     }
 
-    // Top face.
-    if (tile.type!=='house') {
+    // Top face. House plots get a flat foundation colour; the cottage
+    // sprite is drawn over it at the house's south row.
+    {
         let topColor=PALETTE[tile.type]?PALETTE[tile.type].top:'#888';
-        if (tile.type.includes('stone')&&tile.type!=='sandstone') {
+        if (tile.type==='house') topColor=HOUSE_PALETTE.foundation;
+        else if (tile.type.includes('stone')&&tile.type!=='sandstone') {
             const wobble=fbm(x*0.05,y*0.05,1)*5,s=fbm(0,(y+wobble)*0.1,2);
             topColor=tile.type==='stone_high'?(s>0.5?'#a0a0a0':s>0.3?'#888888':'#707070'):(s>0.5?'#8a8a8a':s>0.3?'#737373':'#5a5a5a');
         }
@@ -604,9 +625,18 @@ function render() {
     const dupeBuckets=groupDupesByRow();
     const stockpileRows=buildStockpileRowMap();
     const campfireRows=buildCampfireRowMap();
+    // Houses draw at their south row so dupes north of them are occluded.
+    const houseRows=new Map();
+    for (const h of getHouses()) {
+        const row=h.y+h.h-1;
+        if (!houseRows.has(row)) houseRows.set(row,[]);
+        houseRows.get(row).push(h);
+    }
 
     for (let y=0;y<CONFIG.GRID_ROWS;y++) {
         for (let x=0;x<CONFIG.GRID_COLS;x++) drawTile(x,y);
+
+        if (houseRows.has(y)) for (const h of houseRows.get(y)) drawHouse(h);
 
         if (stockpileRows.has(y)) {
             for (const entry of stockpileRows.get(y)) {

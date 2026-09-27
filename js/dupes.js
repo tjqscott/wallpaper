@@ -36,7 +36,9 @@ function nearestWalkable(cx, cy, radius) {
 // Returns array of {x,y} waypoints (NOT including start, INCLUDING goal).
 // Hard cap: 3000 nodes. On single-island worlds the paths are short.
 
-function astar(sx, sy, gx, gy) {
+function astar(sx, sy, gx, gy, passable, maxIters) {
+    passable = passable || isTileWalkable;
+    maxIters = maxIters || 3000;
     if (sx===gx && sy===gy) return [];
     const W = 200; // key width — safe for GRID_COLS=130
     const key = (x,y) => x * W + y;
@@ -57,7 +59,7 @@ function astar(sx, sy, gx, gy) {
     const dirs = [[0,1],[0,-1],[1,0],[-1,0]];
     let iters = 0;
 
-    while (open.length > 0 && iters < 3000) {
+    while (open.length > 0 && iters < maxIters) {
         iters++;
         // Find min-f node.
         let bi=0;
@@ -83,7 +85,7 @@ function astar(sx, sy, gx, gy) {
         const cg = gScore.get(ck)||0;
         for (const [dx,dy] of dirs) {
             const nx=cur.x+dx, ny=cur.y+dy;
-            if (!isTileWalkable(nx,ny)) continue;
+            if (!passable(nx,ny)) continue;
             const nk=key(nx,ny);
             if (closed.has(nk)) continue;
             const ng=cg+1;
@@ -134,38 +136,59 @@ function advancePath(d) {
 }
 
 // ---- Spawn -------------------------------------------------
+// Colonists spawn on the main island; up to STRANDED_MAX castaways
+// spawn on secondary islands and wait there for a boat rescue.
 
-function randomSpawnTile() {
-    for (let attempt=0;attempt<300;attempt++) {
+function randomSpawnTile(compId) {
+    for (let attempt=0;attempt<400;attempt++) {
         const x=Math.floor(Math.random()*CONFIG.GRID_COLS);
         const y=Math.floor(Math.random()*CONFIG.GRID_ROWS);
-        if (isTileWalkable(x,y)) return {x,y};
+        if (!isTileWalkable(x,y)) continue;
+        if (compId!==undefined&&compIdAt(x,y)!==compId) continue;
+        return {x,y};
     }
     return null;
 }
 
+function makeDupe(i,spawn,stranded) {
+    return {
+        id:i,
+        name:DUPE_NAMES[i%DUPE_NAMES.length],
+        x:spawn.x+0.5, y:spawn.y+0.5,
+        tx:spawn.x+0.5, ty:spawn.y+0.5,
+        wait:Math.random()*60,
+        dir:Math.random()<0.5?1:-1,
+        bobPhase:Math.random()*Math.PI*2,
+        skin:DUPE_PALETTE.skinTones[i%DUPE_PALETTE.skinTones.length],
+        clothes:DUPE_PALETTE.clothes[i%DUPE_PALETTE.clothes.length],
+        state:'idle',
+        carrying:false, carryColor:'#c89a5a',
+        carryTimer:0, carryResource:null, carryTarget:null,
+        job:null, jobPhase:null,
+        path:[], pathGoalX:null, pathGoalY:null,
+        workStandX:null, workStandY:null, // tile they stand on to work
+        stranded:!!stranded, rescueAssigned:false,
+        aboard:null, boardingBoat:null,
+    };
+}
+
 function spawnDupes() {
     dupes.length=0;
-    for (let i=0;i<CONFIG.DUPE_COUNT;i++) {
-        const spawn=randomSpawnTile();
+    const mainComp=islandCentroids.length>0?islandCentroids[0].compId:undefined;
+    let i=0;
+    for (;i<CONFIG.DUPE_COUNT;i++) {
+        const spawn=randomSpawnTile(mainComp)||randomSpawnTile();
         if (!spawn) continue;
-        dupes.push({
-            id:i,
-            name:DUPE_NAMES[i%DUPE_NAMES.length],
-            x:spawn.x+0.5, y:spawn.y+0.5,
-            tx:spawn.x+0.5, ty:spawn.y+0.5,
-            wait:Math.random()*60,
-            dir:Math.random()<0.5?1:-1,
-            bobPhase:Math.random()*Math.PI*2,
-            skin:DUPE_PALETTE.skinTones[i%DUPE_PALETTE.skinTones.length],
-            clothes:DUPE_PALETTE.clothes[i%DUPE_PALETTE.clothes.length],
-            state:'idle',
-            carrying:false, carryColor:'#c89a5a',
-            carryTimer:0, carryResource:null, carryTarget:null,
-            job:null, jobPhase:null,
-            path:[], pathGoalX:null, pathGoalY:null,
-            workStandX:null, workStandY:null, // tile they stand on to work
-        });
+        dupes.push(makeDupe(i,spawn,false));
+    }
+    // Castaways on the largest secondary islands.
+    const secondaries=islandCentroids.slice(1)
+        .filter(c=>c.size>=CONFIG.STRANDED_ISLAND_MIN)
+        .slice(0,CONFIG.STRANDED_MAX);
+    for (const isl of secondaries) {
+        const spawn=nearestWalkable(Math.round(isl.cx),Math.round(isl.cy),10);
+        if (!spawn||compIdAt(spawn.x,spawn.y)!==isl.compId) continue;
+        dupes.push(makeDupe(i++,spawn,true));
     }
 }
 
@@ -211,6 +234,7 @@ function isJobValid(j) {
 
 function updateDupes() {
     for (const d of dupes) {
+        if (d.aboard) { d.x=d.aboard.x; d.y=d.aboard.y; continue; }
         d.bobPhase += d.state==='walk' ? 0.18 : 0.05;
 
         // === WORKING ===
@@ -279,8 +303,8 @@ function updateDupes() {
         }
 
         if (d.wait<=0 && d.jobPhase!=='carry') {
-            // Look for a job if idle.
-            if (!d.job && !d.carrying) {
+            // Look for a job if idle. Castaways and boarding dupes don't work.
+            if (!d.job && !d.carrying && !d.stranded && !d.boardingBoat) {
                 const j=findNearestJob(Math.floor(d.x),Math.floor(d.y));
                 if (j && isJobValid(j)) {
                     const wp=pickWorkPosition(j.x,j.y);
@@ -291,7 +315,7 @@ function updateDupes() {
                         continue;
                     }
                     // Can't reach — mark job unreachable for a bit.
-                    if (j) j._skipUntil=(j._skipUntil||0)+300;
+                    if (j) j._skipUntil=tick+300;
                 }
             }
 

@@ -32,6 +32,8 @@ let dayPhase  = 0.25;   // start slightly past dawn
 
 let seaWaterSet     = null;
 let islandCentroids = [];
+let landComponents  = [];   // every 4-connected walkable body, incl. tiny ones
+let landCompId      = null; // per-tile component index, -1 = not walkable land
 
 // Zone membership per tile: 'village'|'forest'|'farm'|null
 let zoneMap = null;
@@ -77,15 +79,17 @@ function isSeaWater(x,y) { return seaWaterSet&&seaWaterSet.has(`${x},${y}`); }
 // Island centroid + zone map
 // ----------------------------------------------------------------
 function buildIslandCentroids() {
-    const visited=new Set(); islandCentroids=[];
+    const visited=new Set(); islandCentroids=[]; landComponents=[];
+    landCompId=Array.from({length:CONFIG.GRID_ROWS},()=>new Array(CONFIG.GRID_COLS).fill(-1));
     const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
-    for (let y=2;y<CONFIG.GRID_ROWS-2;y++) {
-        for (let x=2;x<CONFIG.GRID_COLS-2;x++) {
+    for (let y=1;y<CONFIG.GRID_ROWS-1;y++) {
+        for (let x=1;x<CONFIG.GRID_COLS-1;x++) {
             const k=`${x},${y}`; if (visited.has(k)) continue;
             const t=tileAt(x,y); if (!t||!WALKABLE_TYPES.has(t.type)) continue;
+            const id=landComponents.length;
             const body=[],q=[[x,y]]; visited.add(k); let head=0;
             while (head<q.length) {
-                const [cx,cy]=q[head++]; body.push([cx,cy]);
+                const [cx,cy]=q[head++]; body.push([cx,cy]); landCompId[cy][cx]=id;
                 for (const [dx,dy] of dirs) {
                     const nx=cx+dx,ny=cy+dy,nk=`${nx},${ny}`;
                     if (!visited.has(nk)) {
@@ -94,17 +98,23 @@ function buildIslandCentroids() {
                     }
                 }
             }
-            if (body.length<30) continue;
             let sx=0,sy=0;
             for (const [bx,by] of body) { sx+=bx; sy+=by; }
-            islandCentroids.push({cx:sx/body.length,cy:sy/body.length,size:body.length});
+            landComponents.push({id,size:body.length,cx:sx/body.length,cy:sy/body.length});
         }
     }
-    islandCentroids.sort((a,b)=>b.size-a.size);
+    islandCentroids=landComponents.filter(c=>c.size>=30)
+        .map(c=>({cx:c.cx,cy:c.cy,size:c.size,compId:c.id}))
+        .sort((a,b)=>b.size-a.size);
     if (islandCentroids.length>0) {
         landCX=islandCentroids[0].cx;
         landCY=islandCentroids[0].cy;
     }
+}
+
+function compIdAt(x,y) {
+    if (!landCompId||y<0||y>=CONFIG.GRID_ROWS||x<0||x>=CONFIG.GRID_COLS) return -1;
+    return landCompId[y][x];
 }
 
 // Assign zones based on angle from land centroid.
@@ -298,56 +308,52 @@ function countBuiltBridges() {
 }
 
 // ----------------------------------------------------------------
-// Bridge planning — straight perpendicular spans only
+// Bridge planning — connectivity-driven straight spans
 // ----------------------------------------------------------------
-// Algorithm:
-// 1. Scan every E-W and N-S line across the map.
-// 2. For each consecutive run of river water (3–8 tiles), check
-//    land on both terminal sides.
-// 3. Accept only runs where EVERY tile in the run is river water
-//    (not open sea — must be connected to sea but have land ≤8
-//    tiles away on BOTH sides of the axis).
-// 4. Sort by span length ascending (shortest crossing first).
-// 5. No bridge within 12 tiles of any existing bridge or planned span.
+// A candidate is a straight run of 3–8 water tiles with walkable
+// land at both terminal ends and no waterfall within 3 tiles.
+// A candidate is accepted when it either:
+//   a) joins two different land components (both ≥12 tiles), or
+//   b) shortcuts a long walk on the same component — the on-land
+//      path between its two ends is ≥6× the span length.
+// Inter-island joins win over shortcuts; shorter spans win ties.
+// No two chosen spans within 12 tiles of each other; max 4 spans.
 
 let plannedBridgeSpans = []; // [{tiles, axis}] finalised plans
 
+// BFS walk distance over land between two walkable tiles.
+// Stops exploring past `cap` steps; returns Infinity if not reached.
+function landDistance(ax,ay,bx,by,cap) {
+    const W=200,key=(x,y)=>x*W+y;
+    const dist=new Map([[key(ax,ay),0]]);
+    const q=[[ax,ay]]; let head=0;
+    while (head<q.length) {
+        const [cx,cy]=q[head++];
+        const d=dist.get(key(cx,cy));
+        if (cx===bx&&cy===by) return d;
+        if (d>=cap) continue;
+        for (const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+            const nx=cx+dx,ny=cy+dy,nk=key(nx,ny);
+            if (dist.has(nk)) continue;
+            const t=tileAt(nx,ny);
+            if (t&&WALKABLE_TYPES.has(t.type)) { dist.set(nk,d+1); q.push([nx,ny]); }
+        }
+    }
+    return Infinity;
+}
+
 function planBridges() {
     plannedBridgeSpans=[];
-    const allCrossings=[];
+    const candidates=[];
 
     function tryRun(run, axis) {
         if (run.length<3||run.length>8) return;
         const first=run[0],last=run[run.length-1];
-        // Check land immediately at both ends.
-        let landA,landB;
-        if (axis==='h') {
-            const tA=tileAt(first.x-1,first.y),tB=tileAt(last.x+1,last.y);
-            landA=tA&&WALKABLE_TYPES.has(tA.type);
-            landB=tB&&WALKABLE_TYPES.has(tB.type);
-        } else {
-            const tA=tileAt(first.x,first.y-1),tB=tileAt(last.x,last.y+1);
-            landA=tA&&WALKABLE_TYPES.has(tA.type);
-            landB=tB&&WALKABLE_TYPES.has(tB.type);
-        }
-        if (!landA||!landB) return;
-        // Ensure it's river not open sea: land within 8 tiles on both sides of axis.
-        const mid=run[Math.floor(run.length/2)];
-        let closeN=false,closeS=false;
-        if (axis==='h') {
-            for (let dy=1;dy<=8;dy++) {
-                const t1=tileAt(mid.x,mid.y-dy),t2=tileAt(mid.x,mid.y+dy);
-                if (t1&&WALKABLE_TYPES.has(t1.type)) closeN=true;
-                if (t2&&WALKABLE_TYPES.has(t2.type)) closeS=true;
-            }
-        } else {
-            for (let dx=1;dx<=8;dx++) {
-                const t1=tileAt(mid.x-dx,mid.y),t2=tileAt(mid.x+dx,mid.y);
-                if (t1&&WALKABLE_TYPES.has(t1.type)) closeN=true;
-                if (t2&&WALKABLE_TYPES.has(t2.type)) closeS=true;
-            }
-        }
-        if (!closeN||!closeS) return; // it's open sea
+        const ax=axis==='h'?first.x-1:first.x, ay=axis==='h'?first.y:first.y-1;
+        const bx=axis==='h'?last.x+1:last.x,  by=axis==='h'?last.y:last.y+1;
+        const tA=tileAt(ax,ay),tB=tileAt(bx,by);
+        if (!tA||!WALKABLE_TYPES.has(tA.type)) return;
+        if (!tB||!WALKABLE_TYPES.has(tB.type)) return;
         // No waterfall nearby.
         for (const {x,y} of run) {
             for (let dy=-3;dy<=3;dy++) for (let dx=-3;dx<=3;dx++) {
@@ -355,7 +361,7 @@ function planBridges() {
                 if (n&&n.feature==='waterfall') return;
             }
         }
-        allCrossings.push({tiles:run.map(r=>({x:r.x,y:r.y})),axis,len:run.length});
+        candidates.push({tiles:run.map(r=>({x:r.x,y:r.y})),axis,len:run.length,ax,ay,bx,by});
     }
 
     // Horizontal scan.
@@ -379,15 +385,27 @@ function planBridges() {
         tryRun(run,'v');
     }
 
-    // Sort shortest first; deduplicate overlapping spans.
-    allCrossings.sort((a,b)=>a.len-b.len);
+    // Score candidates by what the bridge actually buys the colony.
+    const scored=[];
+    for (const c of candidates) {
+        const compA=compIdAt(c.ax,c.ay),compB=compIdAt(c.bx,c.by);
+        if (compA<0||compB<0) continue;
+        if (compA!==compB) {
+            if (Math.min(landComponents[compA].size,landComponents[compB].size)>=12)
+                scored.push({...c,priority:0,benefit:Infinity});
+            continue;
+        }
+        const walk=landDistance(c.ax,c.ay,c.bx,c.by,c.len*8+20);
+        if (walk>=c.len*6) scored.push({...c,priority:1,benefit:walk/c.len});
+    }
+    scored.sort((a,b)=>a.priority-b.priority||a.len-b.len||b.benefit-a.benefit);
+
     const chosenMids=[];
-    for (const cr of allCrossings) {
+    for (const cr of scored) {
         if (plannedBridgeSpans.length>=4) break;
         const mid=cr.tiles[Math.floor(cr.tiles.length/2)];
-        // Must be ≥12 tiles from any already-chosen mid.
         if (chosenMids.some(m=>Math.hypot(m.x-mid.x,m.y-mid.y)<12)) continue;
-        plannedBridgeSpans.push(cr);
+        plannedBridgeSpans.push({tiles:cr.tiles,axis:cr.axis});
         chosenMids.push(mid);
     }
 }
@@ -543,10 +561,11 @@ function spawnHouseJob() {
             const ax=Math.round(cx)+dx,ay=Math.round(cy)+dy;
             if (tileZone(ax,ay)!=='village'&&tileZone(ax,ay)!==null) continue;
             if (!canPlaceHouse(ax,ay,3,2)) continue;
+            const plotZ=tileAt(ax,ay).z;
             for (let hy=0;hy<2;hy++) for (let hx=0;hx<3;hx++) {
                 if (!tileHasJob(ax+hx,ay+hy))
                     jobs.push(makeJob('build_house',ax+hx,ay+hy,
-                        {houseOriginX:ax,houseOriginY:ay,houseW:3,houseH:2}));
+                        {houseOriginX:ax,houseOriginY:ay,houseW:3,houseH:2,plotZ}));
             }
             return;
         }
@@ -662,6 +681,7 @@ function completeJob(j,dupe) {
     }
     else if (j.type==='build_bridge'&&t&&t.type==='water') {
         t.type='bridge'; t.z=PALETTE.bridge.z; t.feature=null;
+        t.bridgeAxis=j.bridgeAxis||null;
         recomputeShadowsAround(j.x,j.y);
     }
     else if (j.type==='build_dock'&&t&&t.type==='water') {
@@ -673,12 +693,14 @@ function completeJob(j,dupe) {
         spawnBoat(j.x,j.y);
     }
     else if (j.type==='build_house'&&t) {
-        t.type='house'; t.z=PALETTE.house.z; t.feature=null;
+        // The plot is levelled to the anchor tile's ground height; the
+        // house itself is a composite sprite, not tile geometry.
+        t.type='house'; t.z=j.plotZ!==undefined?j.plotZ:t.z; t.feature=null;
         t.houseOriginX=j.houseOriginX; t.houseOriginY=j.houseOriginY;
         t.houseW=j.houseW; t.houseH=j.houseH;
         recomputeShadowsAround(j.x,j.y);
         if (!houses.some(h=>h.x===j.houseOriginX&&h.y===j.houseOriginY))
-            houses.push({x:j.houseOriginX,y:j.houseOriginY,w:j.houseW,h:j.houseH});
+            houses.push({x:j.houseOriginX,y:j.houseOriginY,w:j.houseW,h:j.houseH,z:t.z});
     }
 
     jobs.splice(jobs.indexOf(j),1);
@@ -783,7 +805,7 @@ function spawnInitialBoats() {
     // Spawn up to BOAT_MIN boats spread apart.
     const spawned=[];
     for (const c of cands) {
-        if (spawned.length>=CONFIG.BOAT_MIN) break;
+        if (spawned.length>=CONFIG.BOAT_MAX) break;
         if (spawned.some(s=>Math.hypot(s.x-c.x,s.y-c.y)<20)) continue;
         spawnBoat(c.x,c.y);
         spawned.push(c);
@@ -884,7 +906,7 @@ function autoSpawnJobs() {
             for (const tile of span.tiles) {
                 const t2=tileAt(tile.x,tile.y);
                 if (t2&&t2.type==='water'&&!tileHasJob(tile.x,tile.y))
-                    jobs.push(makeJob('build_bridge',tile.x,tile.y));
+                    jobs.push(makeJob('build_bridge',tile.x,tile.y,{bridgeAxis:span.axis}));
             }
             break; // one span at a time
         }
